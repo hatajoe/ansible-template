@@ -1,0 +1,70 @@
+---
+- hosts: all
+  user: root
+  vars:
+    http_port: 80
+    document_root: /var/www/html/proj
+  handlers:
+    - name: epelキーインポート
+      command: /bin/rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-6
+    - name: remiキーインポート
+      command: /bin/rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-remi
+    - name: apache再起動
+      service: name=httpd state=restarted
+    - name: iptables再起動
+      service: name=iptables state=restarted
+  tasks:
+    - name: epelリポジトリインストール
+      yum: name=http://ftp-srv2.kddilabs.jp/Linux/distributions/fedora/epel/6/x86_64/epel-release-6-8.noarch.rpm
+      notify:
+        - epelキーインポート
+
+    - name: remiリポジトリインストール
+      yum: name=http://rpms.famillecollet.com/enterprise/remi-release-6.rpm
+      notify:
+        - remiキーインポート
+
+    - name: ntp自動起動設定
+      service: name=ntpd state=running enabled=yes
+
+    - name: apacheインストール
+      yum: pkg=httpd state=installed
+    - name: apacheドキュメントルート作成
+      file: dest={{ document_root }} state=directory owner=apache group=apache mode=0755
+    - name: apache設定
+      template: src=httpd.conf dest=/etc/httpd/conf/httpd.conf
+      notify: apache再起動
+    - name: apache自動起動設定
+      service: name=httpd state=running enabled=yes
+
+    - name: iptables自動起動設定
+      service: name=iptables state=running enabled=yes
+    - name: iptables設定変更
+      lineinfile: dest=/etc/sysconfig/iptables state=present regexp="{{ http_port }}"
+                  insertafter="^:OUTPUT " line="-A INPUT -p tcp --dport {{ http_port }} -j ACCEPT"
+      notify: iptables再起動
+   
+    - name: phpインストール
+      yum: name={{ item }} state=latest enablerepo=remi,remi-php55
+      with_items:
+        - php
+        - php-devel
+        - php-mbstring
+        - php-mcrypt 
+        - php-mysql
+        - php-pecl-mongo
+        - php-pecl-memcache
+        - php-pecl-redis
+        - php-phpunit-PHPUnit
+        - php-pecl-xdebug
+      notify:
+        - apache再起動
+    - name: phpのタイムゾーン設定
+      lineinfile: >
+        dest=/etc/php.ini
+        regexp='^;?date.timezone ='
+        line='date.timezone = Asia/Tokyo'
+        owner=root
+        group=root
+        mode=0644
+      notify: apache再起動
